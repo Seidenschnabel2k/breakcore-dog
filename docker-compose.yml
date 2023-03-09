@@ -1,0 +1,7 @@
+version: "3.9"
+services:
+  dog:
+    image: "rust:1.67"
+    enviroment:
+      DISCORD_TOKEN=$DISCORD_TOKEN
+
