@@ -7,6 +7,11 @@ use std::{
     },
 };
 use rand::Rng;
+//use tokio::io;
+use std::process::Stdio;
+use tokio::io::{BufReader, AsyncBufReadExt};
+
+use std::convert::TryInto;
 
 use serenity::{
     async_trait,
@@ -46,7 +51,7 @@ impl EventHandler for Handler {
 
 #[group]
 #[commands(
-    deafen, join, leave, play, skip, stop, pause, resume, undeafen, queue, remove
+    deafen, join, leave, play, skip, stop, pause, resume, undeafen, queue, remove, seek
 )]
 struct General;
 
@@ -58,7 +63,7 @@ async fn main() {
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
 
     let framework = StandardFramework::new()
-        .configure(|c| c.prefix("~"))
+        .configure(|c| c.prefix("!"))
         .group(&GENERAL_GROUP);
 
     let intents = GatewayIntents::non_privileged()
@@ -259,6 +264,7 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     Ok(())
 }
 
+
 #[command]
 #[aliases(s)]
 #[only_in(guilds)]
@@ -386,6 +392,43 @@ async fn pause(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
                 .say(
                     &ctx.http,
                     format!("Song paused"),
+                )
+                .await,
+        );
+    } else {
+        check_msg(
+            msg.channel_id
+                .say(&ctx.http, "Not in a voice channel to play in")
+                .await,
+        );
+    }
+
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+async fn seek(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let guild = msg.guild(&ctx.cache).unwrap();
+    let guild_id = guild.id;
+
+    let manager = songbird::get(ctx)
+        .await
+        .expect("Songbird Voice client placed in at initialisation.")
+        .clone();
+
+    if let Some(handler_lock) = manager.get(guild_id) {
+        let handler = handler_lock.lock().await;
+        let queue = handler.queue();
+        let no = args.current().unwrap().parse::<u64>()?;
+        let time = Duration::new(no, 0);
+        let _ = queue.current().unwrap().seek_time(time).unwrap();
+
+        check_msg(
+            msg.channel_id
+                .say(
+                    &ctx.http,
+                    format!("Song seeked to: {}:{}", no/60, no%60),
                 )
                 .await,
         );
