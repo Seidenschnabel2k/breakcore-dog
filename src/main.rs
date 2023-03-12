@@ -252,17 +252,40 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         };
 
         handler.enqueue_source(source.into());
+        match args.single::<String>() {
+            Ok(now) => {
+                if now == "now" {
+                    let front = handler.queue().modify_queue(|a| a.pop_back().unwrap());
+                    handler.queue().modify_queue(|a| a.insert(1, front)) ;
+                let title =  handler.queue().current_queue().get(1).unwrap().metadata().title.clone().unwrap();
+                check_msg(
+                    msg.channel_id
+                        .say(
+                            &ctx.http,
+                            //format!("Added song to queue: position {}", handler.queue().len()),
+                            format!("Added song to the front of the queue: **{}** ", title),
+                        )
+                        .await,
+                );
+                    return Ok(());
+                }
+            },
+            Err(_) => {
+            let title =  handler.queue().current_queue().last().unwrap().metadata().title.clone().unwrap();
+            check_msg(
+                msg.channel_id
+                    .say(
+                        &ctx.http,
+                        //format!("Added song to queue: position {}", handler.queue().len()),
+                        format!("Added song to queue: **{}** at position **{}**", title , handler.queue().len()),
+                    )
+                    .await,
+            );
+                return Ok(());
+            },
+        };
+        
 
-        let title =  handler.queue().current_queue().last().unwrap().metadata().title.clone().unwrap();
-        check_msg(
-            msg.channel_id
-                .say(
-                    &ctx.http,
-                    //format!("Added song to queue: position {}", handler.queue().len()),
-                    format!("Added song to queue: **{}** at position **{}**", title , handler.queue().len()),
-                )
-                .await,
-        );
     } else {
         check_msg(
             msg.channel_id
@@ -388,6 +411,7 @@ async fn skip(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         let handler = handler_lock.lock().await;
         let queue = handler.queue();
         let _ = queue.skip();
+
 
         check_msg(
             msg.channel_id
@@ -552,8 +576,7 @@ async fn seek(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
 
 #[command]
-#[aliases(clear)]
-#[aliases(cl)]
+#[aliases(cl, clear)]
 #[only_in(guilds)]
 async fn stop(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     let guild = msg.guild(&ctx.cache).unwrap();
@@ -618,7 +641,7 @@ async fn undeafen(ctx: &Context, msg: &Message) -> CommandResult {
 #[command]
 #[aliases(q)]
 #[only_in(guilds)]
-async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
+async fn queue(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let guild = msg.guild(&ctx.cache).unwrap();
     let guild_id = guild.id;
 
@@ -645,19 +668,20 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
                 metadata.duration.unwrap().as_secs()%60
             );
             if queue.len() > 1 {
+                let page = args.single::<usize>().unwrap_or(1);
                 queue_str += "\n__**Queue:**__\n```yaml\n";
-                for (index, track) in queue[1..].iter().take(10).enumerate() {
+                for (index, track) in queue[1+(page-1)*10..].iter().take(10).enumerate() {
                     let metadata = track.metadata();
                     queue_str += &format!(
                         "{}: {} | {}:{:02}\n",
-                        index + 1,
+                        index + 1+10*(page-1),
                         &metadata.title.clone().unwrap(),
                         metadata.duration.unwrap().as_secs()/60,
                         metadata.duration.unwrap().as_secs()%60
                     );
                 }
                 if queue.len() > 10 {
-                    queue_str += &format!("... {}", queue.len());
+                    queue_str += &format!("page {}/{}", page, (queue.len()+9)/10);
                 }
                 queue_str += "\n```";
             }
