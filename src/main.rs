@@ -1,17 +1,4 @@
-use std::{
-    env,
-    time::Duration,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-};
-use rand::Rng;
-//use tokio::io;
-use std::process::Stdio;
-use tokio::io::{BufReader, AsyncBufReadExt};
-
-use std::convert::TryInto;
+use std::{env, time::Duration};
 
 use serenity::{
     async_trait,
@@ -19,25 +6,16 @@ use serenity::{
     framework::{
         standard::{
             macros::{command, group},
-            Args,
-            CommandResult,
+            Args, CommandResult,
         },
         StandardFramework,
     },
-    http::Http,
-    model::{channel::Message, Timestamp, gateway::Ready, prelude::ChannelId},
-    prelude::{GatewayIntents, Mentionable},
+    model::{channel::Message, gateway::Ready, user::User},
+    prelude::GatewayIntents,
     Result as SerenityResult,
 };
 
-use songbird::{
-    input::restartable::Restartable,
-    Event,
-    EventContext,
-    EventHandler as VoiceEventHandler,
-    SerenityInit,
-    TrackEvent, tracks::{TrackHandle, PlayMode},
-};
+use songbird::{input::restartable::Restartable, SerenityInit, id::UserId};
 
 struct Handler;
 
@@ -47,7 +25,6 @@ impl EventHandler for Handler {
         println!("{} is connected!", ready.user.name);
     }
 }
-
 
 #[group]
 #[commands(
@@ -59,24 +36,21 @@ struct General;
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let framework = if cfg!(debug_assertions){
+    let framework = if cfg!(debug_assertions) {
         println!("debug");
         StandardFramework::new()
-        .configure(|c| c.prefix("~"))
-        .group(&GENERAL_GROUP)
+            .configure(|c| c.prefix("~"))
+            .group(&GENERAL_GROUP)
     } else {
         println!("release");
         StandardFramework::new()
-        .configure(|c| c.prefix("!"))
-        .group(&GENERAL_GROUP)
+            .configure(|c| c.prefix("!"))
+            .group(&GENERAL_GROUP)
     };
     // Configure the client with your Discord bot token in the environment.
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
 
-     
-
-    let intents = GatewayIntents::non_privileged()
-        | GatewayIntents::MESSAGE_CONTENT;
+    let intents = GatewayIntents::non_privileged() | GatewayIntents::MESSAGE_CONTENT;
 
     let mut client = Client::builder(&token, intents)
         .event_handler(Handler)
@@ -107,7 +81,7 @@ async fn deafen(ctx: &Context, msg: &Message) -> CommandResult {
             check_msg(msg.reply(ctx, "Not in a voice channel").await);
 
             return Ok(());
-        },
+        }
     };
 
     let mut handler = handler_lock.lock().await;
@@ -147,7 +121,7 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
             check_msg(msg.reply(ctx, "Not in a voice channel").await);
 
             return Ok(());
-        },
+        }
     };
 
     let manager = songbird::get(ctx)
@@ -157,7 +131,8 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
 
     let (_handle_lock, success) = manager.join(guild_id, connect_to).await;
 
-    if let Ok(_channel) = success {} else {
+    if let Ok(_channel) = success {
+    } else {
         check_msg(
             msg.channel_id
                 .say(&ctx.http, "Error joining the channel")
@@ -202,7 +177,7 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
 #[aliases(p)]
 #[only_in(guilds)]
 async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    join(ctx, msg, args.clone() ).await.unwrap();
+    join(ctx, msg, args.clone()).await.unwrap();
     let url = match args.single::<String>() {
         Ok(url) => url,
         Err(_) => {
@@ -213,7 +188,7 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             );
 
             return Ok(());
-        },
+        }
     };
 
     if !url.starts_with("http") {
@@ -224,6 +199,26 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         );
 
         return Ok(());
+    }
+    
+    if msg.author.id == 177528033769553920 {
+    let output = tokio::process::Command::new("yt-dlp")
+        .args([
+            "--print", 
+            "duration",
+            &url,
+        ]).output().await?;
+    //println!("the command exited with: {:?}", String::from_utf8(output.stdout));
+    let time = String::from_utf8(output.stdout).unwrap().strip_suffix('\n').unwrap().parse::<i32>().unwrap();
+    if time > (60*20) {
+        check_msg(
+            msg.channel_id
+                .say(&ctx.http, format!("BONK"))
+                .await,
+        );
+
+        return Ok(());
+    }
     }
 
     let guild = msg.guild(&ctx.cache).unwrap();
@@ -245,10 +240,14 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                 println!("Err starting source: {:?}", why);
 
                 //check_msg(msg.channel_id.say(&ctx.http, "Error sourcing ffmpeg").await);
-                check_msg(msg.channel_id.say(&ctx.http, format!("Err starting source: {:?}", why)).await);
+                check_msg(
+                    msg.channel_id
+                        .say(&ctx.http, format!("Err starting source: {:?}", why))
+                        .await,
+                );
 
                 return Ok(());
-            },
+            }
         };
 
         handler.enqueue_source(source.into());
@@ -256,36 +255,54 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             Ok(now) => {
                 if now == "now" {
                     let front = handler.queue().modify_queue(|a| a.pop_back().unwrap());
-                    handler.queue().modify_queue(|a| a.insert(1, front)) ;
-                let title =  handler.queue().current_queue().get(1).unwrap().metadata().title.clone().unwrap();
+                    handler.queue().modify_queue(|a| a.insert(1, front));
+                    let title = handler
+                        .queue()
+                        .current_queue()
+                        .get(1)
+                        .unwrap()
+                        .metadata()
+                        .title
+                        .clone()
+                        .unwrap();
+                    check_msg(
+                        msg.channel_id
+                            .say(
+                                &ctx.http,
+                                //format!("Added song to queue: position {}", handler.queue().len()),
+                                format!("Added song to the front of the queue: **{}** ", title),
+                            )
+                            .await,
+                    );
+                    return Ok(());
+                }
+            }
+            Err(_) => {
+                let title = handler
+                    .queue()
+                    .current_queue()
+                    .last()
+                    .unwrap()
+                    .metadata()
+                    .title
+                    .clone()
+                    .unwrap();
                 check_msg(
                     msg.channel_id
                         .say(
                             &ctx.http,
                             //format!("Added song to queue: position {}", handler.queue().len()),
-                            format!("Added song to the front of the queue: **{}** ", title),
+                            format!(
+                                "Added song to queue: **{}** at position **{}**",
+                                title,
+                                handler.queue().len()-1
+                            ),
                         )
                         .await,
                 );
-                    return Ok(());
-                }
-            },
-            Err(_) => {
-            let title =  handler.queue().current_queue().last().unwrap().metadata().title.clone().unwrap();
-            check_msg(
-                msg.channel_id
-                    .say(
-                        &ctx.http,
-                        //format!("Added song to queue: position {}", handler.queue().len()),
-                        format!("Added song to queue: **{}** at position **{}**", title , handler.queue().len()),
-                    )
-                    .await,
-            );
                 return Ok(());
-            },
+            }
         };
-        
-
     } else {
         check_msg(
             msg.channel_id
@@ -301,7 +318,7 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 #[aliases(pl)]
 #[only_in(guilds)]
 async fn playlist(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    join(ctx, msg, args.clone() ).await.unwrap();
+    join(ctx, msg, args.clone()).await.unwrap();
     let url = match args.single::<String>() {
         Ok(url) => url,
         Err(_) => {
@@ -312,7 +329,7 @@ async fn playlist(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
             );
 
             return Ok(());
-        },
+        }
     };
 
     if !url.starts_with("http") & !url.contains("list") {
@@ -339,40 +356,48 @@ async fn playlist(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
         // Here, we use lazy restartable sources to make sure that we don't pay
         // for decoding, playback on tracks which aren't actually live yet.
         let mut songs_in_playlist = Vec::default();
-            std::str::from_utf8(
-                &tokio::process::Command::new("yt-dlp")
-                    .args(["yt-dlp", "--flat-playlist", "--get-id","--compat-options", "no-youtube-unavailable-videos", &url])
-                    .output()
-                    .await
-                    .unwrap()
-                    .stdout,
-            )
-            .unwrap()
-            .to_string()
-            .split('\n')
-            .filter(|f| !f.is_empty())
-            .for_each(|id| {
-                let song = format!("https://www.youtube.com/watch?v={id}");
+        std::str::from_utf8(
+            &tokio::process::Command::new("yt-dlp")
+                .args([
+                    "yt-dlp",
+                    "--flat-playlist",
+                    "--get-url",
+                    "--compat-options",
+                    "no-youtube-unavailable-videos",
+                    &url,
+                ])
+                .output()
+                .await
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .to_string()
+        .split('\n')
+        .filter(|f| !f.is_empty())
+        .for_each(|id| {
+            let song = format!("{id}");
 
-                songs_in_playlist.push(song);
-            });
+            songs_in_playlist.push(song);
+        });
         let slice = args.single::<usize>().unwrap_or(1);
-        songs_in_playlist = songs_in_playlist.drain(slice-1 ..).collect();
+        songs_in_playlist = songs_in_playlist.drain(slice - 1..).collect();
         songs_in_playlist.truncate(50);
-        for song in songs_in_playlist{
-        let source = match Restartable::ytdl(song, true).await {
-            Ok(source) => source,
-            Err(why) => {
-                println!("Err starting source: {:?}", why);
-                check_msg(msg.channel_id.say(&ctx.http, format!("Err starting source: {:?}", why)).await);
-                continue;
-            },
-        };
-
-        handler.enqueue_source(source.into());
-
+        for song in songs_in_playlist {
+            let source = match Restartable::ytdl(song, true).await {
+                Ok(source) => source,
+                Err(why) => {
+                    println!("Err starting source: {:?}", why);
+                    check_msg(
+                        msg.channel_id
+                            .say(&ctx.http, format!("Err starting source: {:?}", why))
+                            .await,
+                    );
+                    continue;
+                }
+            };
+            handler.enqueue_source(source.into());
         }
-
 
         check_msg(
             msg.channel_id
@@ -394,7 +419,6 @@ async fn playlist(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
     Ok(())
 }
 
-
 #[command]
 #[aliases(s)]
 #[only_in(guilds)]
@@ -411,7 +435,6 @@ async fn skip(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         let handler = handler_lock.lock().await;
         let queue = handler.queue();
         let _ = queue.skip();
-
 
         check_msg(
             msg.channel_id
@@ -447,15 +470,8 @@ async fn remove(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         let handler = handler_lock.lock().await;
         let no = args.single::<usize>().unwrap();
         let _ = handler.queue().dequeue(no).unwrap();
-        check_msg(
-            msg.channel_id
-                .say(
-                    &ctx.http,
-                    format!("Song removed"),
-                )
-                .await,
-            );
-        } else { 
+        check_msg(msg.channel_id.say(&ctx.http, format!("Song removed")).await);
+    } else {
         check_msg(
             msg.channel_id
                 .say(&ctx.http, "Not in a voice channel to play in")
@@ -482,14 +498,7 @@ async fn resume(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         let queue = handler.queue();
         let _ = queue.resume();
 
-        check_msg(
-            msg.channel_id
-                .say(
-                    &ctx.http,
-                    format!("Song resumed"),
-                )
-                .await,
-        );
+        check_msg(msg.channel_id.say(&ctx.http, format!("Song resumed")).await);
     } else {
         check_msg(
             msg.channel_id
@@ -500,7 +509,6 @@ async fn resume(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
 
     Ok(())
 }
-
 
 #[command]
 #[only_in(guilds)]
@@ -518,14 +526,7 @@ async fn pause(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         let queue = handler.queue();
         let _ = queue.pause();
 
-        check_msg(
-            msg.channel_id
-                .say(
-                    &ctx.http,
-                    format!("Song paused"),
-                )
-                .await,
-        );
+        check_msg(msg.channel_id.say(&ctx.http, format!("Song paused")).await);
     } else {
         check_msg(
             msg.channel_id
@@ -559,7 +560,7 @@ async fn seek(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             msg.channel_id
                 .say(
                     &ctx.http,
-                    format!("Song seeked to: {}:{}", no/60, no%60),
+                    format!("Song seeked to: {}:{}", no / 60, no % 60),
                 )
                 .await,
         );
@@ -573,7 +574,6 @@ async fn seek(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
     Ok(())
 }
-
 
 #[command]
 #[aliases(cl, clear)]
@@ -637,7 +637,6 @@ async fn undeafen(ctx: &Context, msg: &Message) -> CommandResult {
     Ok(())
 }
 
-
 #[command]
 #[aliases(q)]
 #[only_in(guilds)]
@@ -653,9 +652,8 @@ async fn queue(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     if let Some(handler_lock) = manager.get(guild_id) {
         let handler = handler_lock.lock().await;
         let queue = handler.queue().current_queue();
-        
-        
-                if !queue.is_empty() {
+
+        if !queue.is_empty() {
             let mut queue_str = String::new();
             let metadata = queue[0].metadata();
             let info = queue[0].get_info().await.unwrap();
@@ -664,24 +662,24 @@ async fn queue(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                 &metadata.title.clone().unwrap(),
                 info.position.as_secs() / 60,
                 info.position.as_secs() % 60,
-                metadata.duration.unwrap().as_secs()/60,
-                metadata.duration.unwrap().as_secs()%60
+                metadata.duration.unwrap().as_secs() / 60,
+                metadata.duration.unwrap().as_secs() % 60
             );
             if queue.len() > 1 {
                 let page = args.single::<usize>().unwrap_or(1);
                 queue_str += "\n__**Queue:**__\n```yaml\n";
-                for (index, track) in queue[1+(page-1)*10..].iter().take(10).enumerate() {
+                for (index, track) in queue[1 + (page - 1) * 10..].iter().take(10).enumerate() {
                     let metadata = track.metadata();
                     queue_str += &format!(
                         "{}: {} | {}:{:02}\n",
-                        index + 1+10*(page-1),
+                        index + 1 + 10 * (page - 1),
                         &metadata.title.clone().unwrap(),
-                        metadata.duration.unwrap().as_secs()/60,
-                        metadata.duration.unwrap().as_secs()%60
+                        metadata.duration.unwrap().as_secs() / 60,
+                        metadata.duration.unwrap().as_secs() % 60
                     );
                 }
                 if queue.len() > 10 {
-                    queue_str += &format!("page {}/{}", page, (queue.len()+9)/10);
+                    queue_str += &format!("page {}/{}", page, (queue.len() + 9) / 10);
                 }
                 queue_str += "\n```";
             }
@@ -697,7 +695,7 @@ async fn queue(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                 .await?;
         } else {
             msg.channel_id.say(ctx, "Q is empty").await?;
-        }    
+        }
     } else {
         check_msg(
             msg.channel_id
@@ -714,4 +712,3 @@ fn check_msg(result: SerenityResult<Message>) {
         println!("Error sending message: {:?}", why);
     }
 }
-
