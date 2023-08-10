@@ -560,7 +560,7 @@ async fn seek(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             msg.channel_id
                 .say(
                     &ctx.http,
-                    format!("Song seeked to: {}:{}", no / 60, no % 60),
+                    format!("Song seeked to: {}:{:02}", no / 60, no % 60),
                 )
                 .await,
         );
