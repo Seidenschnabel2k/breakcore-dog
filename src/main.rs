@@ -28,7 +28,7 @@ impl EventHandler for Handler {
 
 #[group]
 #[commands(
-    deafen, join, leave, play, skip, stop, pause, resume, undeafen, queue, remove, seek, playlist
+    deafen, join, leave, play, skip, stop, pause, resume, undeafen, queue, remove, seek, playlist, spotifyplaylist
 )]
 struct General;
 
@@ -314,6 +314,108 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     Ok(())
 }
 
+#[command]
+#[aliases(spl)]
+#[only_in(guilds)]
+async fn spotifyplaylist(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    join(ctx, msg, args.clone()).await.unwrap();
+    let url = match args.single::<String>() {
+        Ok(url) => url,
+        Err(_) => {
+            check_msg(
+                msg.channel_id
+                    .say(&ctx.http, "Must provide a URL to a video or audio")
+                    .await,
+            );
+
+            return Ok(());
+        }
+    };
+
+    if !url.starts_with("http") & !url.contains("spotify") {
+        check_msg(
+            msg.channel_id
+                .say(&ctx.http, "Must provide a valid Youtube Playlist URL")
+                .await,
+        );
+
+        return Ok(());
+    }
+
+    let guild = msg.guild(&ctx.cache).unwrap();
+    let guild_id = guild.id;
+
+    let manager = songbird::get(ctx)
+        .await
+        .expect("Songbird Voice client placed in at initialisation.")
+        .clone();
+
+    if let Some(handler_lock) = manager.get(guild_id) {
+        let mut handler = handler_lock.lock().await;
+
+        // Here, we use lazy restartable sources to make sure that we don't pay
+        // for decoding, playback on tracks which aren't actually live yet.
+        let mut songs_in_playlist = Vec::default();
+        std::str::from_utf8(
+            &tokio::process::Command::new("spotdl")
+                .args([
+                    "url",
+                    &url,
+                    "--log-level",
+                    "CRITICAL",
+                    "--preload"
+                ])
+                .output()
+                .await
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .to_string()
+        .split('\n')
+        .filter(|f| !f.is_empty())
+        .for_each(|id| {
+            let song = format!("{id}");
+            songs_in_playlist.push(song);
+        });
+        let slice = args.single::<usize>().unwrap_or(0);
+        songs_in_playlist = songs_in_playlist.drain(slice ..).collect();
+        songs_in_playlist.truncate(50);
+        for song in songs_in_playlist {
+            let source = match Restartable::ytdl(song, true).await {
+                Ok(source) => source,
+                Err(why) => {
+                    println!("Err starting source: {:?}", why);
+                    check_msg(
+                        msg.channel_id
+                            .say(&ctx.http, format!("Err starting source: {:?}", why))
+                            .await,
+                    );
+                    continue;
+                }
+            };
+            handler.enqueue_source(source.into());
+        }
+
+        check_msg(
+            msg.channel_id
+                .say(
+                    &ctx.http,
+                    //format!("Added song to queue: position {}", handler.queue().len()),
+                    format!("**{}** Songs in queue", handler.queue().len()),
+                )
+                .await,
+        );
+    } else {
+        check_msg(
+            msg.channel_id
+                .say(&ctx.http, "Not in a voice channel to play in")
+                .await,
+        );
+    }
+
+    Ok(())
+}
 #[command]
 #[aliases(pl)]
 #[only_in(guilds)]
@@ -662,8 +764,8 @@ async fn queue(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                 &metadata.title.clone().unwrap(),
                 info.position.as_secs() / 60,
                 info.position.as_secs() % 60,
-                metadata.duration.unwrap().as_secs() / 60,
-                metadata.duration.unwrap().as_secs() % 60
+                metadata.duration.unwrap_or(Duration::new(0,0)).as_secs() / 60,
+                metadata.duration.unwrap_or(Duration::new(0,0)).as_secs() % 60
             );
             if queue.len() > 1 {
                 let page = args.single::<usize>().unwrap_or(1);
@@ -673,9 +775,9 @@ async fn queue(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                     queue_str += &format!(
                         "{}: {} | {}:{:02}\n",
                         index + 1 + 10 * (page - 1),
-                        &metadata.title.clone().unwrap(),
-                        metadata.duration.unwrap().as_secs() / 60,
-                        metadata.duration.unwrap().as_secs() % 60
+                        &metadata.title.clone().unwrap_or(String::from("None")),
+                        metadata.duration.unwrap_or(Duration::new(0,0)).as_secs() / 60,
+                        metadata.duration.unwrap_or(Duration::new(0,0)).as_secs() % 60
                     );
                 }
                 if queue.len() > 10 {
@@ -688,7 +790,7 @@ async fn queue(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                 .send_message(ctx.clone(), |m| {
                     m.embed(|e| {
                         e.description(&queue_str);
-                        e.image(metadata.thumbnail.clone().unwrap().as_str());
+                        e.image(metadata.thumbnail.clone().unwrap_or(String::from("https://images.genius.com/3dfe73b95ec2f0a2b98fde86c266c082.999x999x1.jpg")).as_str());
                         e
                     })
                 })
